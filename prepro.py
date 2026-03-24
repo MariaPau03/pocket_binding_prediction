@@ -6,7 +6,7 @@ from Bio.Seq import Seq #contiene aa
 
 def pdb_to_fasta(pdb_file, output_dir):
     parser = PDB.PDBParser(QUIET=True) #el lector de pdb
-    struct_id = os.path.basename(pdb_file).split('.') #extraer el nombre del arcivo paa usarl como id
+    struct_id = os.path.basename(pdb_file).split('.')[0] #extraer el nombre del arcivo paa usarl como id
     structure = parser.get_structure(struct_id, pdb_file)#extaer estructura
     
     ppb = PDB.PPBuilder() #contruye peptidos buscando aa que esten conectados fisicamente en el PDB
@@ -31,7 +31,7 @@ def pdb_to_fasta(pdb_file, output_dir):
         print(f"FASTA generado: {out_path}")
 
 # Automatización para carpeta
-pdb_folder = "data/pdbs"
+pdb_folder = "data/"
 fasta_folder = "data/fastas"
 os.makedirs(fasta_folder, exist_ok=True)
 

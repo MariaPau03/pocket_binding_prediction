@@ -2,7 +2,7 @@ import numpy as np
 import os
 
 def mock_pssm_generator(fasta_file, output_dir): #id desde el fasta
-    struct_id = os.path.basename(fasta_file).split('.')
+    struct_id = os.path.basename(fasta_file).split('.')[0]
     output_path = os.path.join(output_dir, f"{struct_id}.pssm")
     
     # 2. Leemos el archivo FASTA que creamos en el paso anterior
@@ -25,3 +25,18 @@ def mock_pssm_generator(fasta_file, output_dir): #id desde el fasta
             #Es aleatorio para que puedas testear la estructura de tu pipeline sin tener que configurar servidores de bioinformática pesados.
             # 7. Guardamos la fila: ej. "1,M,0.8543"
             f.write(f"{i+1},{aa},{fake_score:.4f}\n")
+
+if __name__ == "__main__":
+    # All your execution logic stays here
+    fasta_folder = "data/fastas"
+    pssm_folder = "data/pssms"
+    os.makedirs(pssm_folder, exist_ok=True)
+
+    if os.path.exists(fasta_folder):
+        for file in os.listdir(fasta_folder):
+            if file.endswith(".fasta"):
+                input_path = os.path.join(fasta_folder, file)
+                mock_pssm_generator(input_path, pssm_folder)
+                print(f"PSSM generated for: {file}")
+    else:
+        print(f"Directory {fasta_folder} not found!")

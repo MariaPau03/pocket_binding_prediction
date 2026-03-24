@@ -1,6 +1,8 @@
 from data.pdb_parser import Protein
-from geometry.neighbors import NeighborSearch
-from geometry.sas import SASPointGenerator
+from geometry.neighbors import NeighborSearch #imports the KDTree-based neighbor search
+from geometry.sas import SASPointGenerator #imports the SAS point generator
+from geometry.features import FeatureExtractor
+import numpy as np
 
 def save_sas_points(filename, points):
     with open(filename, "w") as f:
@@ -53,6 +55,23 @@ def main():
     print("\nPipeline working correctly!")
 
     save_sas_points("sas_points.pdb", sas_points)
+
+    # ---------------------------------------
+    # Feature extraction
+    # ---------------------------------------
+    print("\nExtracting features...")
+    extractor = FeatureExtractor(protein, neighbor_search, radius=10.0)
+    feature_matrix = extractor.extract_all(sas_points)
+
+    print(f"Feature matrix shape: {feature_matrix.shape}")
+    # → (N_sas_points, 34)  — 7 geometry + 27 physicochemical
+
+    # Save for later use in the Random Forest step
+    np.save("features.npy", feature_matrix)
+    print("Features saved to features.npy")
+
+    
+
 
 if __name__ == "__main__":
     main()

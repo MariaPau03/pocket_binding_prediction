@@ -119,8 +119,35 @@ def main():
     args = parser.parse_args()
 
     if args.pdb_file:
-        # Single file mode
-        run_pipeline(args.pdb_file)
+        argpath = args.pdb_file
+
+        if os.path.isdir(argpath):
+            # Directory mode – process every .pdb file in provided folder
+            pdb_files = [
+                os.path.join(argpath, f)
+                for f in os.listdir(argpath)
+                if f.endswith(".pdb")
+            ]
+            if len(pdb_files) == 0:
+                print(f"No PDB files found in directory '{argpath}'")
+                return
+
+            print(f"Found {len(pdb_files)} PDB file(s) in '{argpath}': {[os.path.basename(f) for f in pdb_files]}")
+
+            for pdb_file in sorted(pdb_files):
+                run_pipeline(pdb_file)
+
+            print("\nAll proteins processed.")
+
+        elif os.path.isfile(argpath):
+            # Single file mode
+            run_pipeline(argpath)
+
+        else:
+            print(f"Error: path '{argpath}' does not exist.")
+            print("Provide a valid PDB file path or a directory containing .pdb files, or run with no arguments to process data/.")
+            return
+
     else:
         # Batch mode — process every .pdb file in data/
         pdb_files = [
@@ -138,7 +165,6 @@ def main():
             run_pipeline(pdb_file)
 
         print("\nAll proteins processed.")
-
 
 
 if __name__ == "__main__":

@@ -1,177 +1,378 @@
 from data.pdb_parser import Protein
-from geometry.neighbors import NeighborSearch #imports the KDTree-based neighbor search
-from geometry.sas import SASPointGenerator #imports the SAS point generator
+from geometry.neighbors import NeighborSearch
+from geometry.sas import SASPointGenerator
 from geometry.features import FeatureExtractor
 from prepro import pdb_to_fasta
-from evolution import mock_pssm_generator       
+from evolution import mock_pssm_generator
+from model.labels import LabelGenerator
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix
+from sklearn.utils import resample
+from sklearn.cluster import DBSCAN
+
 import numpy as np
 import os
 import argparse
+import joblib
 
-def save_sas_points(filename, points):
-    with open(filename, "w") as f:
-        for i, p in enumerate(points):
-            f.write(
-                f"HETATM{i:5d}  C   SAS A   1    "
-                f"{p[0]:8.3f}{p[1]:8.3f}{p[2]:8.3f}  1.00  0.00           C\n"
-            )
+# Directories to store intermediate files
+FASTA_DIR = "data/fastas/"
+PSSM_DIR = "data/pssms/"
 
-def run_pipeline(pdb_file):
-    """Run the full feature extraction pipeline for a single PDB file."""
 
-    # Derive all paths from the input file — no hardcoded IDs
-    struct_id  = os.path.basename(pdb_file).split(".")[0]   # e.g. "1GUA"
-    fasta_dir  = "data/fastas/"
-    pssm_dir   = "data/pssms/"
-    fasta_file = os.path.join(fasta_dir, f"{struct_id}.fasta")
-    pssm_file  = os.path.join(pssm_dir,  f"{struct_id}.pssm")
-    sas_file   = f"sas_points_{struct_id}.pdb"
-    feat_file  = f"data/{struct_id}_features.npy"
+# =========================================================
+# DATA PROCESSING
+# =========================================================
 
-    os.makedirs(fasta_dir, exist_ok=True)
-    os.makedirs(pssm_dir,  exist_ok=True)
+def process_protein(pdb_file):
+    """
+    Process one protein: - Load structure  - Generate SAS points  - Extract features  - Generate labels
+    Return features (X) and labels (y) for one protein
+    """
 
-    print(f"\n{'='*50}")
-    print(f"Processing: {struct_id}")
-    print(f"{'='*50}")
+    # Extract unique identifier from filename (without extension)
+    struct_id = os.path.splitext(os.path.basename(pdb_file))[0]
 
-    
-    # ---------------------------------------
+    print(f"\nProcessing {struct_id}")
+
+    # -------------------------
     # Load protein
-    # ---------------------------------------
-    print("\n[1/5] Loading protein...")
+    # -------------------------
     protein = Protein(pdb_file)
     protein.load()
-    print(f"  Atoms:        {len(protein.atoms)}")
-    print(f"  Residues:     {len(protein.residues)}")
-    print(f"  Ligand atoms: {len(protein.ligand_atoms)}")
 
+    # Skip proteins without ligands
+    if len(protein.ligand_atoms) == 0:
+        print("  Skipping (no ligand)")
+        return None, None, None
 
-    # ---------------------------------------
-    # Build neighbor search (KDTree)
-    # ---------------------------------------
-    print("\nBuilding KDTree...")
-    coords = protein.get_atom_coordinates()
+    # -------------------------
+    # Build KDTree
+    # -------------------------
+    coords = protein.get_atom_coordinates()     # Nx3 array of atom coordinates
     neighbor_search = NeighborSearch(coords)
 
-    # Test neighbor query
-    test_point = coords[0]
-    neighbors = neighbor_search.query(test_point, radius=5.0)
-    print(f"Neighbors within 5Å of first atom: {len(neighbors)}")
-
-    # ---------------------------------------
+    # -------------------------
     # Generate SAS points
-    # ---------------------------------------
-    print("\nGenerating SAS points...")
+    # -------------------------
     sas_generator = SASPointGenerator(protein, neighbor_search)
     sas_points = sas_generator.generate_SAS()
-    print(f"Number of SAS points: {len(sas_points)}")
 
-    # ---------------------------------------
-    # Basic sanity checks
-    # ---------------------------------------
+    # Skip if no surface points were generated
     if len(sas_points) == 0:
-        print("WARNING: No SAS points generated!")
-    else:
-        print("SAS generation OK")
+        print("  Skipping (no SAS points)")
+        return None, None, None
 
-    print("\nPipeline working correctly!")
+    # -------------------------
+    # Generate FASTA and PSSM
+    # -------------------------
+    fasta_file = os.path.join(FASTA_DIR, f"{struct_id}.fasta")
+    pssm_file  = os.path.join(PSSM_DIR,  f"{struct_id}.pssm")
 
-    save_sas_points("sas_points.pdb", sas_points)
-    
+    # Ensure directories exist
+    os.makedirs(FASTA_DIR, exist_ok=True)
+    os.makedirs(PSSM_DIR, exist_ok=True)
 
-    # ---------------------------------------
-    # Generate FASTA + mock PSSM
-    # ---------------------------------------
-    print("\n[4/5] Generating FASTA and PSSM...")
-    pdb_to_fasta(pdb_file, fasta_dir)           # → data/fastas/<struct_id>.fasta
-    mock_pssm_generator(fasta_file, pssm_dir)   # → data/pssms/<struct_id>.pssm
-    print(f"  FASTA: {fasta_file}")
-    print(f"  PSSM:  {pssm_file}")
+    # Generate FASTA only if not already present
+    if not os.path.exists(fasta_file):
+        pdb_to_fasta(pdb_file, FASTA_DIR)
 
-    # ---------------------------------------
-    # Feature extraction
-    # ---------------------------------------
-    print("\nExtracting features...")
+    # Generate mock PSSM (random conservation scores)
+    if not os.path.exists(pssm_file):
+        mock_pssm_generator(fasta_file, PSSM_DIR)
+
+    # -------------------------
+    # Features extraction
+    # -------------------------
     extractor = FeatureExtractor(protein, neighbor_search, radius=10.0)
-    extractor.load_pssm(pssm_file)
-    feature_matrix = extractor.extract_all(sas_points)
+    extractor.load_pssm(pssm_file)  # Load conservation scores
 
-    print(f"  Feature matrix shape: {feature_matrix.shape}")
-    # → (N_sas_points, 39) — 7 geo + 27 phys + 4 curve + 1 evol
+    # Compute feature vector for each SAS point
+    X = extractor.extract_all(sas_points)
 
-    np.save(feat_file, feature_matrix)
-    print(f"  Saved to {feat_file}")
+    # -------------------------
+    # Label generation
+    # -------------------------
+    label_gen = LabelGenerator(protein, neighbor_search)
+    y = label_gen.label_all(sas_points)     # 1 = binding, 0 = non-binding
 
-    return feature_matrix
+    # Skip if no positive samples (cannot train)
+    if np.sum(y) == 0:
+        print("  Skipping (no positive labels)")
+        return None, None, None
+
+    return X, y, sas_points
+
+
+def load_dataset(directory):
+    """Process all PDBs in a directory and build dataset"""
+
+    # Collect all PDB files
+    pdb_files = [
+        os.path.join(directory, f)
+        for f in os.listdir(directory)
+        if f.endswith(".pdb")
+    ]
+
+    all_X, all_y = [], []
+
+    for pdb_file in sorted(pdb_files):
+        print(f"Processing {os.path.basename(pdb_file)}")
+
+        # Process each protein independently -> get its features (X) and labels (y)
+        X, y, _ = process_protein(pdb_file)
+
+        if X is None:
+            print("  Skipped")
+            continue
+
+        print(f"  Points: {len(y)} | Positives: {np.sum(y)}")
+
+        # Accumulate data
+        all_X.append(X)
+        all_y.append(y)
+
+    # If no valid proteins
+    if len(all_X) == 0:
+        return None, None
+
+    # Concatenate all proteins into one dataset
+    return np.vstack(all_X), np.concatenate(all_y)
+
+
+# =========================================================
+# BALANCING
+# =========================================================
+
+def balance_dataset(X, y):
+    """Balance dataset by undersampling negatives"""
+
+    # Separate positive and negative samples
+    X_pos = X[y == 1]
+    X_neg = X[y == 0]
+
+    print(f"\nBefore balancing: pos={len(X_pos)}, neg={len(X_neg)}")
+
+    # Randomly downsample negatives to match positives
+    X_neg_down = resample(
+        X_neg,
+        replace=False,          # no repetition
+        n_samples=len(X_pos),   # match number of positives
+        random_state=42         # reproducibility
+    )
+
+    # Combine balanced dataset
+    X_bal = np.vstack([X_pos, X_neg_down])
+    y_bal = np.hstack([
+        np.ones(len(X_pos)),
+        np.zeros(len(X_neg_down))
+    ])
+
+    print(f"After balancing: {len(X_bal)} samples")
+
+    return X_bal, y_bal
+
+
+# =========================================================
+# CLUSTERING (POCKETS)
+# =========================================================
+
+def cluster_points(sas_points, probs, threshold=0.1, eps=3.0, min_samples=5):
+    """
+    Cluster high-scoring SAS points into binding pockets
+    """
+
+    # Select only points with high probability -> ranking
+    mask = probs > threshold
+    selected_points = sas_points[mask]
+    selected_scores = probs[mask]
+
+    if len(selected_points) == 0:
+        return []
+
+    # Apply DBSCAN clustering in 3D space
+    clustering = DBSCAN(eps=eps, min_samples=min_samples)
+    labels = clustering.fit_predict(selected_points)
+
+    pockets = []
+
+    # Iterate over clusters
+    for cluster_id in set(labels):
+        if cluster_id == -1:
+            continue
+
+        pts = selected_points[labels == cluster_id]
+        scores = selected_scores[labels == cluster_id]
+
+        # Compute cluster center (mean coordinate)
+        center = np.mean(pts, axis=0)
+        # Pocket score (sum of squared scores)
+        pocket_score = np.sum(scores ** 2)
+
+        pockets.append({
+            "center": center,
+            "size": len(pts),
+            "score": pocket_score
+        })
+
+    # Sort pockets by score
+    pockets = sorted(pockets, key=lambda x: x["score"], reverse=True)
+
+    return pockets
+
+
+# =========================================================
+# EVALUATION
+# =========================================================
+
+def evaluate_model(model, X_test, y_test):
+    """Evaluate model and print metrics"""
+
+    # Predict probabilities with the model 
+    # The output is a ranking
+    probs = model.predict_proba(X_test)[:, 1]
+
+    # Convert to binary predictions using threshold
+    threshold = 0.1
+    preds = (probs > threshold).astype(int)
+
+    # Compute metrics
+    acc = accuracy_score(y_test, preds)
+    prec = precision_score(y_test, preds)
+    rec = recall_score(y_test, preds)
+    auc = roc_auc_score(y_test, probs)
+
+    # Confusion matrix: TN, FP, FN, TP
+    tn, fp, fn, tp = confusion_matrix(y_test, preds).ravel()
+
+    print("\n===== POINT-LEVEL EVALUATION =====")
+    print(f"Accuracy:  {acc:.4f}")
+    print(f"Precision: {prec:.4f}")
+    print(f"Recall:    {rec:.4f}")
+    print(f"AUC:       {auc:.4f}")
+
+    print(f"\nTP: {tp} | FP: {fp} | TN: {tn} | FN: {fn}")
+
+    # Information about score distribution
+    print("\nScore stats:")
+    print(f"Max prob: {np.max(probs):.3f}")
+    print(f"Mean prob: {np.mean(probs):.3f}")
+
+    return probs
+
+
+# =========================================================
+# MAIN
+# =========================================================
 
 def main():
-    # ── Option A: pass a specific PDB file as argument ─────────────────────
-    # Usage: python main.py data/1GUA.pdb
-    # ── Option B: process all PDB files in data/ ───────────────────────────
-    # Usage: python main.py
+    parser = argparse.ArgumentParser(description="Train and evaluate binding site predictor")
+    parser.add_argument("train_dir", help="Training PDB directory")
+    parser.add_argument("--test_dir", help="Test PDB directory (optional)")
 
-    parser = argparse.ArgumentParser(description="Pocket binding prediction pipeline")
-    parser.add_argument(
-        "pdb_file", nargs="?", default=None,
-        help="Path to a single PDB file. If omitted, all PDBs in data/ are processed."
-    )
     args = parser.parse_args()
 
-    if args.pdb_file:
-        argpath = args.pdb_file
+    # -------------------------
+    # TRAIN
+    # -------------------------
+    print("\n=== TRAINING ===")
 
-        if os.path.isdir(argpath):
-            # Directory mode – process every .pdb file in provided folder
-            pdb_files = [
-                os.path.join(argpath, f)
-                for f in os.listdir(argpath)
-                if f.endswith(".pdb")
-            ]
-            if len(pdb_files) == 0:
-                print(f"No PDB files found in directory '{argpath}'")
-                return
+    # Load training dataset
+    X_train, y_train = load_dataset(args.train_dir)
+    
+    if X_train is None:
+        print("No training data!")
+        return
 
-            print(f"Found {len(pdb_files)} PDB file(s) in '{argpath}': {[os.path.basename(f) for f in pdb_files]}")
+    print(f"\nTraining samples: {X_train.shape[0]}")
 
-            for pdb_file in sorted(pdb_files):
-                run_pipeline(pdb_file)
+    # Balance dataset
+    X_train, y_train = balance_dataset(X_train, y_train)
 
-            print("\nAll proteins processed.")
+    # TRAIN Random Forest model
+    model = RandomForestClassifier(
+        n_estimators=200,   # number of trees
+        n_jobs=-1           # use all CPU cores
+    )
 
-        elif os.path.isfile(argpath):
-            # Single file mode
-            run_pipeline(argpath)
+    model.fit(X_train, y_train)
+    print("Model trained")
 
-        else:
-            print(f"Error: path '{argpath}' does not exist.")
-            print("Provide a valid PDB file path or a directory containing .pdb files, or run with no arguments to process data/.")
-            return
+    # Save trained model
+    joblib.dump(model, "rf_model.pkl")
+    print("Model saved!")
 
-    else:
-        # Batch mode — process every .pdb file in data/
+    # -------------------------
+    # TEST
+    # -------------------------
+    if args.test_dir:
+        print("\n=== TESTING ===")
+
         pdb_files = [
-            os.path.join("data", f)
-            for f in os.listdir("data")
+            os.path.join(args.test_dir, f)
+            for f in os.listdir(args.test_dir)
             if f.endswith(".pdb")
         ]
-        if len(pdb_files) == 0:
-            print("No PDB files found in data/")
-            return
 
-        print(f"Found {len(pdb_files)} PDB file(s): {[os.path.basename(f) for f in pdb_files]}")
+        all_probs = []
+        all_y = []
 
-        for pdb_file in sorted(pdb_files):
-            run_pipeline(pdb_file)
+        for pdb_file in pdb_files:
+            print(f"\nTesting {os.path.basename(pdb_file)}")
 
-        print("\nAll proteins processed.")
+            # Process test protein
+            X_test, y_test, sas_points = process_protein(pdb_file)
+
+            if X_test is None:
+                continue
+            
+            # PREDICT scores
+            probs = model.predict_proba(X_test)[:, 1]
+
+            # ---- clustering ----
+            pockets = cluster_points(sas_points, probs)
+
+            print(f"Detected {len(pockets)} pockets")
+
+            for i, p in enumerate(pockets[:3]):
+                print(f"Pocket {i+1}: size={p['size']} score={p['score']:.2f}")
+
+            # ---- per-protein evaluation ----
+            evaluate_model(model, X_test, y_test)
+
+            # ---- accumulate ----
+            all_probs.append(probs)
+            all_y.append(y_test)
+
+
+        # =========================
+        # GLOBAL EVALUATION
+        # =========================
+        print("\n\n=== GLOBAL EVALUATION ===")
+
+        all_probs = np.concatenate(all_probs)
+        all_y = np.concatenate(all_y)
+
+        threshold = 0.1
+        preds = (all_probs > threshold).astype(int)
+
+        from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix
+
+        acc = accuracy_score(all_y, preds)
+        prec = precision_score(all_y, preds)
+        rec = recall_score(all_y, preds)
+        auc = roc_auc_score(all_y, all_probs)
+
+        tn, fp, fn, tp = confusion_matrix(all_y, preds).ravel()
+
+        print(f"Accuracy:  {acc:.4f}")
+        print(f"Precision: {prec:.4f}")
+        print(f"Recall:    {rec:.4f}")
+        print(f"AUC:       {auc:.4f}")
+
+        print(f"TP: {tp} | FP: {fp} | TN: {tn} | FN: {fn}")
 
 
 if __name__ == "__main__":
     main()
-
-# pip install:
-# biopython
-# freesasa
-# scipy
-# numpy

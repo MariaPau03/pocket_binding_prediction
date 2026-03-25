@@ -2,7 +2,7 @@ import numpy as np
 import os
 
 def mock_pssm_generator(fasta_file, output_dir): #id desde el fasta
-    struct_id = os.path.basename(fasta_file).split('.')[0]
+    struct_id = os.path.splitext(os.path.basename(fasta_file))[0]
     output_path = os.path.join(output_dir, f"{struct_id}.pssm")
     
     # 2. Leemos el archivo FASTA que creamos en el paso anterior

@@ -241,6 +241,7 @@ def evaluate_model(model, X_test, y_test):
     acc = accuracy_score(y_test, preds)
     prec = precision_score(y_test, preds)
     rec = recall_score(y_test, preds)
+    f1 = f1_score(y_test, preds)
     auc = roc_auc_score(y_test, probs)
 
     # Confusion matrix: TN, FP, FN, TP
@@ -250,6 +251,7 @@ def evaluate_model(model, X_test, y_test):
     print(f"Accuracy:  {acc:.4f}")
     print(f"Precision: {prec:.4f}")
     print(f"Recall:    {rec:.4f}")
+    print(f"F1-Score:  {f1:.4f}")
     print(f"AUC:       {auc:.4f}")
 
     print(f"\nTP: {tp} | FP: {fp} | TN: {tn} | FN: {fn}")
@@ -362,6 +364,7 @@ def main():
         acc = accuracy_score(all_y, preds)
         prec = precision_score(all_y, preds)
         rec = recall_score(all_y, preds)
+        f1 = f1_score(all_y, preds)
         auc = roc_auc_score(all_y, all_probs)
 
         tn, fp, fn, tp = confusion_matrix(all_y, preds).ravel()
@@ -369,6 +372,7 @@ def main():
         print(f"Accuracy:  {acc:.4f}")
         print(f"Precision: {prec:.4f}")
         print(f"Recall:    {rec:.4f}")
+        print(f"F1-Score:  {f1:.4f}")
         print(f"AUC:       {auc:.4f}")
 
         print(f"TP: {tp} | FP: {fp} | TN: {tn} | FN: {fn}")

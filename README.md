@@ -27,7 +27,7 @@ pocket_binding_prediction/
 ## Installation
 
 ```bash
-pip install biopython freesasa scipy numpy
+pip install biopython freesasa scipy numpy scikit-learn
 ```
 
 ---

@@ -7,7 +7,7 @@ from evolution import mock_pssm_generator
 from model.labels import LabelGenerator
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix
+from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix, f1_score
 from sklearn.utils import resample
 from sklearn.cluster import DBSCAN
 
@@ -356,7 +356,7 @@ def main():
         all_probs = np.concatenate(all_probs)
         all_y = np.concatenate(all_y)
 
-        threshold = 0.1
+        threshold = 0.5
         preds = (all_probs > threshold).astype(int)
 
         from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix

@@ -58,6 +58,14 @@ python main.py data/1GUA.pdb
 python main.py
 ```
 
+**To predict binding pockets for a specific PDB file using the trained model:**
+
+```bash
+python predict.py data/subset_chen11/a.001.001.001_1s69a.pdb
+```
+
+
+
 ---
 
 ## Pipeline

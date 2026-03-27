@@ -13,13 +13,18 @@ pocket_binding_prediction/
 │   ├── fastas/                 # generated FASTA sequences
 │   ├── pssms/                  # generated conservation scores
 │   ├── pdb_parser.py           # PDB loading and data model
-│   └── prepro.py         # PDB → FASTA conversion
+│   └── prepro.py               # PDB → FASTA conversion
 ├── geometry/
 │   ├── neighbors.py            # KDTree-based neighbor search
 │   ├── sas.py                  # SAS point generation
 │   └── features.py             # feature extraction (39 features)
+├── model/
+│   └── labels.py               # SAS point labelling (binding / non-binding)
+├── output/
+│   └── pocket_writer.py        # residue CSV + visualization PDB writer
 ├── evolution.py                # mock PSSM generator
-└── main.py                     # pipeline entry point
+├── predict.py                  # quick prediction script (score CSV only)
+└── main.py                     # full pipeline entry point (train + predict)
 ```
 
 ---
@@ -34,43 +39,87 @@ pip install biopython freesasa scipy numpy scikit-learn
 
 ## Usage
 
-**Convert PDB --> Fasta:**
+**Convert PDB → FASTA:**
 ```bash
 python prepro.py
 ```
+Make sure there is (at least) a PDB file inside the `data/` folder.
 
-Make sure that there's a PDB file inside the data folder
-
-**Obtain the PSSM from Fasta file:**
+**Generate PSSM conservation scores from FASTA:**
 ```bash
 python evolution.py
 ```
+Produces a CSV file of mock conservation scores in `data/pssms/`.
 
-Will produce a CSV file of the PSSM
+---
 
-**Process a single PDB file:**
-```bash
-python main.py data/1GUA.pdb
-```
+### `predict.py` — quick prediction (score summary only)
 
-**Process all PDB files in `data/` at once:**
-```bash
-python main.py
-```
-
-**To predict binding pockets for a specific PDB file using the trained model:**
+Loads a trained model and outputs a pocket-level score CSV to `csv/`.
 
 ```bash
+# Single file
+python predict.py data/1GUA.pdb
 python predict.py data/subset_chen11/a.001.001.001_1s69a.pdb
+
+# Whole directory
+python predict.py data/
 ```
 
+Output: `csv/<protein_name>_results.csv` with pocket center coordinates and scores.
+
+---
+
+### `main.py` — full pipeline (train + predict + full outputs)
+
+**Training:**
+```bash
+python main.py train data/chen11/
+python main.py train data/chen11/ --pssm_dir data/pssms/
+python main.py train data/chen11/ --model_out my_model.pkl
+```
+
+**Prediction — single file:**
+```bash
+python main.py predict data/1GUA.pdb
+python main.py predict data/1GUA.pdb --model rf_model.pkl
+python main.py predict data/1GUA.pdb --model rf_model.pkl --threshold 0.5
+python main.py predict data/1GUA.pdb --model rf_model.pkl --pssm_dir data/pssms/ --output_dir results/
+```
+
+**Prediction — whole directory:**
+```bash
+python main.py predict data/chen11/
+python main.py predict data/chen11/ --model rf_model.pkl --threshold 0.4 --output_dir results/
+```
+
+**Built-in help:**
+```bash
+python main.py --help
+python main.py train --help
+python main.py predict --help
+```
+
+| Flag | Mode | Default | Purpose |
+|---|---|---|---|
+| `--pssm_dir` | both | `None` | Folder with `.pssm` conservation files |
+| `--model_out` | train | `rf_model.pkl` | Where to save the trained model |
+| `--model` | predict | `rf_model.pkl` | Which model to load |
+| `--threshold` | predict | `0.3` | Min probability to count a point as binding |
+| `--output_dir` | predict | `output/` | Where to write the output files |
+
+---
+
+### Difference between `predict.py` and `main.py predict`
+
+Use `predict.py` for a quick score summary. Use `main.py` for the full outputs needed for visualization and residue analysis.
 
 
 ---
 
-## Pipeline
+## Pipeline 
 
-The pipeline runs 5 sequential steps for each PDB file:
+The pipeline runs the following sequential steps for each PDB file:
 
 ```
 [1] Load protein         pdb_parser.py     → Protein object (atoms, residues, ligands)
@@ -78,16 +127,36 @@ The pipeline runs 5 sequential steps for each PDB file:
 [3] Generate SAS points  sas.py            → Surface point cloud
 [4] Generate PSSM        evolution.py      → Conservation scores per residue
 [5] Extract features     features.py       → Feature matrix (N_points × 39)
+[6] Label points         labels.py         → Binary labels (binding / non-binding)
+[7] Train / load model   main.py           → RandomForest classifier
+[8] Cluster pockets      main.py           → DBSCAN on high-probability SAS points
+[9] Write outputs        pocket_writer.py  → Residue CSV + visualization PDB
 ```
+
+[1] `python prepro.py` --> Convert PDBs to FASTA
+[2] `python evolution.py` --> Obtain from FASTA the PSSMs
+[3] `python main.py train data/chen11/ --model_out my_model.pkl > train.log` --> Model training
+[4] `python main.py predict data/subset_holo4k/ --model my_model.pkl --threshold 0.4 --output_dir output/ > predict.log` --> Prediction
+[5] `pymol results/pockets/target_pockets.pdb` --> Visualizatoin
+
+
 
 ### Output files per protein (e.g. `1GUA`)
 
-| File | Description |
-|---|---|
-| `data/fastas/1GUA.fasta` | Protein sequence in FASTA format |
-| `data/pssms/1GUA.pssm` | Per-residue conservation scores |
-| `data/1GUA_features.npy` | Feature matrix — input to the classifier |
-| `sas_points_1GUA.pdb` | SAS points — visualizable in PyMOL or ChimeraX |
+| File | Script | Description |
+|---|---|---|
+| `data/fastas/1GUA.fasta` | `prepro.py` | Protein sequence in FASTA format |
+| `data/pssms/1GUA.pssm` | `evolution.py` | Per-residue conservation scores |
+| `csv/1GUA_results.csv` | `predict.py` | Pocket centers, sizes and scores |
+| `output/csv/1GUA_residues.csv` | `main.py` | Amino acids involved in each pocket (with coordinates) |
+| `output/pockets/1GUA_pockets.pdb` | `main.py` | Visualization file for PyMOL / ChimeraX |
+
+The visualization PDB contains the full protein as `ATOM` records and each predicted pocket as `HETATM` records on a separate chain (B, C, D…), allowing independent colouring in PyMOL or ChimeraX:
+
+```bash
+pymol output/pockets/1GUA_pockets.pdb
+chimerax output/pockets/1GUA_pockets.pdb
+```
 
 ---
 
@@ -208,9 +277,9 @@ All lookup tables are defined at module level in `features.py`:
 
 ## Next steps
 
-- [ ] **Labeling** — assign `1` (binding) / `0` (non-binding) to each SAS point using `protein.ligand_atoms`
-- [ ] **Training** — train a `RandomForestClassifier` on the labeled feature matrix
-- [ ] **Clustering** — group high-score SAS points into predicted pockets (DBSCAN)
+- [x] **Labeling** — assign `1` (binding) / `0` (non-binding) to each SAS point using `protein.ligand_atoms`
+- [x] **Training** — train a `RandomForestClassifier` on the labeled feature matrix
+- [x] **Clustering** — group high-score SAS points into predicted pockets (DBSCAN)
 - [ ] **Evaluation** — compute DCC, DVO, and AUC on benchmark datasets (COACH420, HOLO4K)
 - [ ] **Real PSSM** — replace mock scores with PSI-BLAST output against UniRef90
 - [ ] **ESM embeddings** — add ESM-2 residue embeddings as additional evolutionary features

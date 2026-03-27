@@ -75,7 +75,7 @@ Output: `csv/<protein_name>_results.csv` with pocket center coordinates and scor
 **Training:**
 ```bash
 python main.py train data/chen11/
-python main.py train data/chen11/ --pssm_dir data/pssms/
+python main.py train data/chen11/ --pssm_dir data/pssms/    # This takes a lot of time :(
 python main.py train data/chen11/ --model_out my_model.pkl
 ```
 
@@ -133,10 +133,15 @@ The pipeline runs the following sequential steps for each PDB file:
 [9] Write outputs        pocket_writer.py  → Residue CSV + visualization PDB
 ```
 
+
 [1] `python prepro.py` --> Convert PDBs to FASTA
+
 [2] `python evolution.py` --> Obtain from FASTA the PSSMs
+
 [3] `python main.py train data/chen11/ --model_out my_model.pkl > train.log` --> Model training
+
 [4] `python main.py predict data/subset_holo4k/ --model my_model.pkl --threshold 0.4 --output_dir output/ > predict.log` --> Prediction
+
 [5] `pymol results/pockets/target_pockets.pdb` --> Visualizatoin
 
 

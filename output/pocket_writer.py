@@ -164,3 +164,58 @@ class PocketWriter:
             f.write("END\n")
 
         print(f"Visualization PDB saved to {output_path}")
+    
+    def write_chimera_format(self, pockets, sas_points_per_pocket,
+                          scores, struct_id, results_dir="results"):
+        """
+        Writes one PDB per pocket cluster + results.log
+        into organized subfolders instead of one folder per protein.
+        """
+        pdbs_dir  = os.path.join(results_dir, "pdbs")
+        logs_dir  = os.path.join(results_dir, "logs")
+        cmds_dir  = os.path.join(results_dir, "cmd_scripts")
+        shots_dir = os.path.join(results_dir, "screenshots")
+
+        for folder in [pdbs_dir, logs_dir, cmds_dir, shots_dir]:
+            os.makedirs(folder, exist_ok=True)
+
+        # ── 1. Individual log (needed by visualize_clusters) ──────────────────
+        individual_log = os.path.join(logs_dir, f"{struct_id}_results.log")
+        with open(individual_log, "w") as f:
+            for i, score in enumerate(scores, start=1):
+                f.write(f"Cluster {i}: score={score:.4f}\n")
+
+        # ── 2. Consolidated log (all proteins in one file) ────────────────────
+        consolidated_log = os.path.join(results_dir, "all_results.log")
+        with open(consolidated_log, "a") as f:      # "a" = append, not overwrite
+            f.write(f"\n{'='*40}\n")
+            f.write(f"Protein: {struct_id}\n")
+            f.write(f"{'='*40}\n")
+            for i, score in enumerate(scores, start=1):
+                f.write(f"Cluster {i}: score={score:.4f}\n")
+
+        # ── 3. Write one PDB per cluster ──────────────────────────────────────
+        for pocket_id, (center, sas_pts) in enumerate(
+            zip(pockets, sas_points_per_pocket), start=1
+        ):
+            cluster_path = os.path.join(pdbs_dir, f"{struct_id}cluster_{pocket_id}.pdb")
+            residues = self.get_pocket_residues(center)
+
+            with open(cluster_path, "w") as f:
+                atom_idx = 1
+                for atom in self.protein.atoms:
+                    for res in residues:
+                        if (atom.chain_id == res["chain"] and
+                                atom.residue_id == res["residue_id"]):
+                            x, y, z = atom.coord
+                            f.write(
+                                f"ATOM  {atom_idx:5d} {atom.name:<4s} "
+                                f"{atom.residue_name:>3s} {atom.chain_id}"
+                                f"{atom.residue_id:4d}    "
+                                f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00"
+                                f"          {atom.element:>2s}\n"
+                            )
+                            atom_idx += 1
+                            break
+
+            print(f"  Cluster {pocket_id} written: {cluster_path}")

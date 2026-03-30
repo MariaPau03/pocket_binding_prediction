@@ -30,7 +30,7 @@ from geometry.sas import SASPointGenerator
 from geometry.features import FeatureExtractor
 from model.labels import LabelGenerator
 from output.pocket_writer import PocketWriter
-
+from visualization.visualize import visualize_clusters
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. PROTEIN PROCESSING
@@ -127,17 +127,9 @@ def cluster_points(sas_points, probabilities, threshold=0.3,
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. OUTPUTS  (residue list + visualization PDB)
-# ══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
 
-def write_outputs(pockets, protein, ns, protein_name, output_dir="output"):
-    """
-    Write the two requested output files for a set of predicted pockets.
-
-    Files created
-    -------------
-    output/csv/<protein_name>_residues.csv     — amino acids per pocket
-    output/pockets/<protein_name>_pockets.pdb  — visualisation file (PyMOL / Chimera)
-    """
+def write_outputs(pockets, protein, ns, protein_name, output_dir="output", results_dir="results"):
     if not pockets:
         print("\n[!] No pockets to write.")
         return
@@ -149,18 +141,38 @@ def write_outputs(pockets, protein, ns, protein_name, output_dir="output"):
 
     writer = PocketWriter(protein, ns)
 
-    # ── 3a. CSV: list of residues per pocket ──────────────────────────────────
+    pocket_centers        = [p["center"] for p in pockets]
+    sas_pts_per_pocket    = [p["points"] for p in pockets]
+    pocket_scores         = [p["score"]  for p in pockets]  # ← add this
+
+    # ── 6a. CSV ───────────────────────────────────────────────────────────
     csv_path = os.path.join(csv_dir, f"{protein_name}_residues.csv")
-    pocket_centers = [p["center"] for p in pockets]
     print(f"\n[6a] Writing residue list → {csv_path}")
     writer.write_residues_csv(pocket_centers, csv_path)
 
-    # ── 3b. PDB: visualisation for PyMOL / Chimera ───────────────────────────
+    # ── 6b. Combined PDB for PyMOL/ChimeraX ──────────────────────────────
     pdb_path = os.path.join(pdb_dir, f"{protein_name}_pockets.pdb")
-    sas_pts_per_pocket = [p["points"] for p in pockets]
-    print(f"[6b] Writing visualisation PDB → {pdb_path}")
+    print(f"[6b] Writing visualization PDB → {pdb_path}")
     writer.write_visualization_pdb(pocket_centers, sas_pts_per_pocket, pdb_path)
 
+    # ── 6c. Chimera format (one PDB per cluster + log) ────────────────────
+    print(f"[6c] Writing Chimera format → {results_dir}/")
+    writer.write_chimera_format(
+        pockets               = pocket_centers,
+        sas_points_per_pocket = sas_pts_per_pocket,
+        scores                = pocket_scores,
+        struct_id             = protein_name,
+        results_dir           = results_dir
+    )
+
+    # ── 6d. Auto-visualize with ChimeraX ─────────────────────────────────
+    print(f"[6d] Running ChimeraX visualization …")
+    visualize_clusters(
+        pdb_id      = protein_name,
+        top_n       = 3,
+        rotate      = False,
+        results_dir = results_dir
+    )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 4. TRAINING MODE
@@ -207,8 +219,7 @@ def train(pdb_files, pssm_dir=None, model_out="my_model.pkl"):
 # 5. PREDICTION MODE
 # ══════════════════════════════════════════════════════════════════════════════
 
-def predict(pdb_path, model_path, pssm_dir=None,
-            threshold=0.3, output_dir="output"):
+def predict(pdb_path, model_path, pssm_dir=None, threshold=0.3, output_dir="output", results_dir="results"):
     """
     Run the full prediction pipeline on a single PDB file and write outputs.
     """
@@ -234,7 +245,7 @@ def predict(pdb_path, model_path, pssm_dir=None,
     for i, p in enumerate(pockets[:5], 1):
         print(f"    Pocket {i}: score={p['score']:.3f}  size={p['size']}")
 
-    write_outputs(pockets, protein, ns, name, output_dir)
+    write_outputs(pockets, protein, ns, name, output_dir, results_dir)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -264,6 +275,8 @@ def build_parser():
                     help="Minimum predicted probability to consider a point")
     pr.add_argument("--output_dir", default="output",
                     help="Directory for output files")
+    pr.add_argument("--results_dir", default="results",
+                help="Directory for chimera format outputs and screenshots")
 
     return p
 
@@ -304,6 +317,7 @@ def main():
                 pssm_dir    = args.pssm_dir,
                 threshold   = args.threshold,
                 output_dir  = args.output_dir,
+                results_dir = args.results_dir,
             )
         print("\nDone.")
 

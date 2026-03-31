@@ -443,8 +443,10 @@ All lookup tables are defined at module level in `features.py`:
 
 The pipeline was evaluated on a GLOBAL TEST SET consisting of over 1.8 million SAS points. Using a classification threshold of 0.1, the Random Forest model achieved the following metrics:
 
+```
           label  threshold  n_samples  n_binding_points  accuracy  precision   recall  f1_score      auc    tp    fp      tn    fn  min_prob  mean_prob  max_prob
 GLOBAL TEST SET        0.1    1873479             84344  0.928401   0.304344 0.459179  0.366062 0.857512 38729 88525 1700610 45615       0.0   0.029722      0.97
+```
 
 While the precision reflects the inherent difficulty of imbalanced surface data (where binding points are rare), the high AUC and Accuracy demonstrate that the model effectively prioritizes the correct geometric regions.
 

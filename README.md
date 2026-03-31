@@ -85,8 +85,12 @@ Processes all PDB files in the training folder, extracts features and labels, tr
 python main.py predict data/1GUA.pdb --model my_model.pkl --threshold 0.4 --output_dir output/ --results_dir results/
 
 # Whole directory (e.g. 100 proteins)
-python main.py predict data/subset_holo4k/ --model my_model.pkl --threshold 0.4 --output_dir output/ --results_dir results/
+python main.py predict data/subset_holo4k/ --model my_model.pkl --threshold 0.4 --eval_threshold 0.1 --output_dir output/ --results_dir results/
 ```
+
+- `--threshold 0.4` → used for clustering/selecting pocket points
+- `--eval_threshold 0.1` → used for turning probabilities into binary labels for evaluation metrics
+- evaluation summaries are also saved automatically to `results/logs/prediction_evaluation.csv`
 
 ### Step 5 — Visualize results
 
@@ -112,6 +116,7 @@ chimerax results/cmd_scripts/visualize_121p.cxc
 | `--model_out` | train | `my_model.pkl` | Where to save the trained model |
 | `--model` | predict | `my_model.pkl` | Which model to load |
 | `--threshold` | predict | `0.3` | Min probability to count a point as binding |
+| `--eval_threshold` | both | `0.1` | Threshold used to compute evaluation metrics |
 | `--output_dir` | predict | `output/` | Where to write CSV and PDB output files |
 | `--results_dir` | predict | `results/` | Where to write ChimeraX format outputs |
 
@@ -273,7 +278,7 @@ alias chimerax='open -a /Applications/ChimeraX-1.11.1.app'
 chimerax results/cmd_scripts/visualize_121p.cxc
 ```
 
-To solve this, run this command `find "/Users/mariapaupijoan/Desktop/Master/2nd TERM/SBI-PYT/pocket_binding_prediction/results/cmd_scripts" -type f \( -name "*.cxc" -o -name "*.cmd" \) -exec sed -i '' '/^[[:space:]]*exit[[:space:]]*$/d' {} +`. Double check that only the `exit` word is removed properly from all the `cxc` files, and run again `chimerax results/cmd_scripts/visualize_121p.cxc`.
+To solve this, run this command `find "~/pocket_binding_prediction/results/cmd_scripts" -type f \( -name "*.cxc" -o -name "*.cmd" \) -exec sed -i '' '/^[[:space:]]*exit[[:space:]]*$/d' {} +`. Double check that only the `exit` word is removed properly from all the `cxc` files, and run again `chimerax results/cmd_scripts/visualize_121p.cxc`.
 
 __IMPORTANT__: Once have opened the `visualize_X.cxc` file, open its respective protein pocket from _pocket_binding_prediction/output/pockets_ and you'll better where the binding sites are!!
 
@@ -444,10 +449,6 @@ This protein-ligand binding site prediction model shows high reliability but fol
 In addition, the final pipeline fulfills the objective of the assignment: it takes a protein structure in `.pdb` format as input and predicts ligand-binding sites using a structure-based approach. For each analyzed protein, the program generates (i) a CSV file listing the amino acids involved in each detected pocket, for example `output/csv/121p_residues.csv`, and (ii) a visualization-ready PDB file such as `output/pockets/121p_pockets.pdb`, which can be opened in ChimeraX or PyMOL. The auxiliary files in `results/` (`pdbs/`, `logs/`, `cmd_scripts/`, and `screenshots/`) further support interpretation and presentation of the predicted binding sites.
 
 Therefore, the project delivers the requested outputs: protein-structure input, predicted ligand-binding sites, residue lists for each site, and files suitable for molecular visualization software.
-
-![binding pocket black](binding_pocket_black.png)
-
-This is an example of the binding site prediction pockets is represented using ChimeraX.
 
 ---
 

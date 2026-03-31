@@ -80,22 +80,16 @@ def visualize_clusters(pdb_id, top_n=1, rotate=False, results_dir="results"):
             f.write("turn y 180\n")
 
         f.write("view\n")
-        f.write("exit\n")
+        
 
         # ── Screenshot saved into screenshots/ ────────────────────────────
         screenshot_path = os.path.abspath(
             os.path.join(shots_dir, f"{pdb_id}_clusters.png")  # ← updated
         )
         # f.write(f'save "{screenshot_path}" format png\n')
+        f.write("exit\n")
 
     # ── Run ChimeraX headless ─────────────────────────────────────────────
-
-    # subprocess.run([
-    #     "/Applications/ChimeraX-1.11.1.app/Contents/MacOS/ChimeraX",
-    #     "--nogui",          # <- nogui  no window opens, it just executes the commands and saves the PNG automatically. You won't see anything on screen but the screenshot appears in results/screenshots/ when it's done.
-    #     "--offscreen",      # <- enables rendering without a display
-    #     "--script", chimera_script_path
-    # ])
 
     try:
         subprocess.run([
@@ -105,3 +99,13 @@ def visualize_clusters(pdb_id, top_n=1, rotate=False, results_dir="results"):
         ], timeout=30)
     except Exception as e:
         print(f"  [warning] ChimeraX visualization skipped: {e}")
+
+    # try:
+    #     subprocess.run([
+    #         "/Applications/ChimeraX-1.11.1.app/Contents/MacOS/ChimeraX",
+    #         "--nogui",
+    #         "--offscreen",    # ← add this
+    #         "--script", chimera_script_path
+    #     ], timeout=60)        # ← increase timeout for rendering
+    # except Exception as e:
+    #     print(f"  [warning] ChimeraX visualization skipped: {e}")

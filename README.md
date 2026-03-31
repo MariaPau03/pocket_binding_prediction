@@ -464,8 +464,7 @@ The pipeline was validated using known structures such as 121P (H-Ras) and 1AEK 
 
 - Electrostatic Validation: For the GDP/GTP binding site in 121P, the positive electrostatic potential (blue/white) perfectly complements the negatively charged phosphate groups of the ligand.
 
-![alt text](results-1.png)
-
+![alt text](<Screenshot 2026-04-01 at 01.13.11.png>)
 ---
 
 ## References

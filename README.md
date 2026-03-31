@@ -70,7 +70,7 @@ However, due to consuming computational resources , the pssm won't be used in a 
 ### Step 3 — Train the model
 
 ```bash
-python main.py train data/chen11/
+python main.py train data/chen11/ --model_out my_model.pkl
 python main.py train data/chen11/ --pssm_dir data/pssms/ --model_out my_model.pkl
 ```
 
@@ -95,6 +95,7 @@ python main.py predict data/subset_holo4k/ --model my_model.pkl --threshold 0.4 
 pymol output/pockets/121p_pockets.pdb
 
 # Or open the combined PDB in ChimeraX
+alias chimerax='open -a /Applications/ChimeraX-1.11.1.app'
 chimerax output/pockets/121p_pockets.pdb
 
 # Or run the pre-generated ChimeraX script for a specific protein
@@ -443,6 +444,10 @@ This protein-ligand binding site prediction model shows high reliability but fol
 In addition, the final pipeline fulfills the objective of the assignment: it takes a protein structure in `.pdb` format as input and predicts ligand-binding sites using a structure-based approach. For each analyzed protein, the program generates (i) a CSV file listing the amino acids involved in each detected pocket, for example `output/csv/121p_residues.csv`, and (ii) a visualization-ready PDB file such as `output/pockets/121p_pockets.pdb`, which can be opened in ChimeraX or PyMOL. The auxiliary files in `results/` (`pdbs/`, `logs/`, `cmd_scripts/`, and `screenshots/`) further support interpretation and presentation of the predicted binding sites.
 
 Therefore, the project delivers the requested outputs: protein-structure input, predicted ligand-binding sites, residue lists for each site, and files suitable for molecular visualization software.
+
+![alt text](binding_pocket_black.png)
+
+This is an example of the binding site prediction pockets is represented using ChimeraX. 
 
 ---
 

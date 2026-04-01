@@ -20,7 +20,7 @@ import argparse
 import numpy as np
 import joblib
 
-
+# Machine learning
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
@@ -55,7 +55,10 @@ def process_protein(pdb_path, pssm_path=None):
     ns         : NeighborSearch     — KD-tree built on protein atoms
     """
     print(f"\n[1] Parsing: {pdb_path}")
+
+    # Load protein structure (atoms, residues, ligand)
     protein = Protein(pdb_path)
+
     print(f"    {len(protein.atoms)} protein atoms | "
           f"{len(protein.ligand_atoms)} ligand atoms | "
           f"{len(protein.residues)} residues")
@@ -65,31 +68,34 @@ def process_protein(pdb_path, pssm_path=None):
     # -------------------------
     print("[2] Building neighbour search …")
     atom_coords = protein.get_atom_coordinates()
-    ns = NeighborSearch(atom_coords)
+    ns = NeighborSearch(atom_coords)    # KDTree for fast spatial queries (which atoms are near this point)
 
     # -------------------------
-    # Generate SAS points
+    # Generate SAS points (3D coordinates of solvent-accessible surface)
     # -------------------------
     print("[3] Generating SAS points …")
-    sas_gen    = SASPointGenerator(protein, ns)
-    sas_points = sas_gen.generate_SAS()
+    sas_gen    = SASPointGenerator(protein, ns)     # Generates points on the solvent-accessible surface (SAS) of the protein
+    sas_points = sas_gen.generate_SAS()   # List of 3D coordinates of SAS points
     print(f"    {len(sas_points)} SAS points generated")
 
     # -------------------------
     # Features extraction
     # -------------------------
     print("[4] Extracting features …")
-    extractor = FeatureExtractor(protein, ns)
+    extractor = FeatureExtractor(protein, ns)   # Extracts features for each SAS point
+    
+    # load PSSM if available
     if pssm_path and os.path.exists(pssm_path):
         extractor.load_pssm(pssm_path)
-    X = extractor.extract_all(sas_points)
+
+    X = extractor.extract_all(sas_points)   # Feature matrix (N_points, N_features) for all SAS points
 
     # -------------------------
     # Label generation
     # -------------------------
     print("[5] Labelling points …")
     labeller = LabelGenerator(protein, ns)
-    y = labeller.label_all(sas_points)
+    y = labeller.label_all(sas_points)  # Assign binary labels to each SAS point based on proximity to ligand atoms (1 = binding, 0 = non-binding)
     n_binding = int(y.sum())
     print(f"    Binding: {n_binding} / {len(y)}  "
           f"({'no ligand found' if n_binding == 0 else 'OK'})")
@@ -114,6 +120,8 @@ def cluster_points(sas_points, probabilities, threshold=0.3,
         'score'      float   (mean probability of cluster members)
         'points'     np.ndarray (K, 3)  — SAS points in this cluster
     """
+    
+    # Select high-probability points
     mask = probabilities >= threshold
     candidate_points = sas_points[mask]
     candidate_probs  = probabilities[mask]
@@ -121,24 +129,28 @@ def cluster_points(sas_points, probabilities, threshold=0.3,
     if len(candidate_points) == 0:
         return []
 
+    # Cluster spatially close points using DBSCAN
     labels = DBSCAN(eps=eps, min_samples=min_samples).fit_predict(candidate_points)
 
     pockets = []
     for label in set(labels):
-        if label == -1:          # noise
+        if label == -1:  # noise
             continue
+
         idx    = labels == label
         pts    = candidate_points[idx]
         probs  = candidate_probs[idx]
+
         pockets.append({
-            "center": pts.mean(axis=0),
-            "size":   int(idx.sum()),
-            "score":  float(probs.mean()),
-            "points": pts,
+            "center": pts.mean(axis=0),     # pocket center: average 3D coordinate of cluster members
+            "size":   int(idx.sum()),       # pocket size: number of points in this cluster
+            "score":  float(probs.mean()),  # pocket score: average predicted probability of cluster members
+            "points": pts,                  # pocket points: the actual 3D coordinates of the SAS points in this cluster
         })
 
-    # Sort by score descending
+    # Sort by score descending (rank pockets by their average predicted probability)
     pockets.sort(key=lambda p: p["score"], reverse=True)
+
     return pockets
 
 
@@ -182,21 +194,31 @@ def save_evaluation(metrics, output_csv):
 
 
 def evaluate_scores(probs, y_test, threshold=0.1, label="TEST SET", output_csv=None):
-    """Evaluate probability scores against ground-truth labels and print metrics."""
+    """
+    Evaluate predictions at point level.
+    Evaluate probability scores against ground-truth labels and print metrics.
+    """
+
+    # Handle case where evaluation data is missing or empty
     if probs is None or y_test is None or len(y_test) == 0:
         print(f"\n===== {label} EVALUATION =====")
         print("No evaluation data available.")
         return None, None
 
+    # Convert probabilities to binary predictions using the specified threshold
     preds = (probs >= threshold).astype(int)
 
+    # Compute evaluation metrics by using sklearn functions to compare predicted labels against true labels
     acc = accuracy_score(y_test, preds)
     prec = precision_score(y_test, preds, zero_division=0)
     rec = recall_score(y_test, preds, zero_division=0)
     f1 = f1_score(y_test, preds, zero_division=0)
     auc = roc_auc_score(y_test, probs) if len(np.unique(y_test)) > 1 else None
+
+    # Compute confusion matrix to get true positives, false positives, true negatives, and false negatives
     tn, fp, fn, tp = confusion_matrix(y_test, preds, labels=[0, 1]).ravel()
 
+    # Compile all metrics into a dictionary for logging and potential CSV output
     metrics = {
         "label": label,
         "threshold": float(threshold),
@@ -216,13 +238,14 @@ def evaluate_scores(probs, y_test, threshold=0.1, label="TEST SET", output_csv=N
         "max_prob": float(np.max(probs)),
     }
 
+    # Print a evaluation summary to the standard output
     print(f"\n===== {label} EVALUATION =====")
     print(f"Threshold: {threshold:.2f}")
     print(f"Accuracy:  {acc:.4f}")
     print(f"Precision: {prec:.4f}")
     print(f"Recall:    {rec:.4f}")
     print(f"F1-Score:  {f1:.4f}")
-
+    
     if auc is not None:
         print(f"AUC:       {auc:.4f}")
     else:
@@ -234,13 +257,18 @@ def evaluate_scores(probs, y_test, threshold=0.1, label="TEST SET", output_csv=N
     print(f"Mean prob: {np.mean(probs):.3f}")
     print(f"Max prob:  {np.max(probs):.3f}")
 
+    # Save evaluation summary to CSV if an output path is provided
     save_evaluation(metrics, output_csv)
+
     return preds, metrics
 
 
 def evaluate_model(model, X_test, y_test, threshold=0.1, label="TEST SET", output_csv=None):
     """Predict probabilities with a model and print evaluation metrics."""
+    
+    # Predict probabilities for the test set using the provided model
     probs = model.predict_proba(X_test)[:, 1]
+    # Evaluate the predicted probabilities against the true labels and print/save metrics
     preds, metrics = evaluate_scores(
         probs,
         y_test,
@@ -256,6 +284,12 @@ def evaluate_model(model, X_test, y_test, threshold=0.1, label="TEST SET", outpu
 # ═════════════════════════════════════════════════════════════════════════════
 
 def write_outputs(pockets, protein, ns, protein_name, output_dir="output", results_dir="results"):
+    """
+    Write predicted pockets to output files:
+      - CSV listing residues per pocket   (output/<name>_residues.csv)
+      - Visualization PDB for PyMOL/Chimera (output/<name>_pockets.pdb)
+      - Chimera format (one PDB per cluster + log) (results/)
+    """
     if not pockets:
         print("\n[!] No pockets to write.")
         return
@@ -265,6 +299,7 @@ def write_outputs(pockets, protein, ns, protein_name, output_dir="output", resul
     os.makedirs(csv_dir, exist_ok=True)
     os.makedirs(pdb_dir, exist_ok=True)
 
+    # Initialize the PocketWriter with the protein and neighbor search (KD-tree) for spatial queries
     writer = PocketWriter(protein, ns)
 
     pocket_centers        = [p["center"] for p in pockets]
@@ -312,15 +347,21 @@ def train(
     eval_log_path=None,
 ):
     """
-    Train a RandomForest on a list of PDB files that contain ligands.
+    Train a RandomForest model on a list of PDB files that contain ligands.
     Saves the trained model to *model_out*.
     """
     all_X, all_y = [], []
 
+    # Process each PDB file and collect features + labels for all SAS points across the dataset
     for pdb in pdb_files:
+        # Extract the base name of the PDB file (without extension) to use for logging and output naming
         name      = os.path.splitext(os.path.basename(pdb))[0]
         pssm_path = os.path.join(pssm_dir, f"{name}.pssm") if pssm_dir else None
+
+        # Process the protein structure to get features (X) and labels (y) for all SAS points
         X, y, _, _, _ = process_protein(pdb, pssm_path)
+
+        # Append the features and labels from this protein to the overall dataset (only if features were successfully extracted)
         if X is not None:
             all_X.append(X)
             all_y.append(y)
@@ -334,21 +375,27 @@ def train(
 
     print(f"\nTotal samples: {len(y)}  |  binding: {int(y.sum())}")
 
+    # Train/test split for evaluation during training
     X_tr, X_te, y_tr, y_te = train_test_split(
         X,
         y,
-        test_size=0.2,
-        random_state=42,
-        stratify=y,
+        test_size=0.2,      # hold out 20% of the data for testing
+        random_state=42,    # ensure reproducibility of the split
+        stratify=y,         # maintain the same proportion of binding/non-binding points in train and test sets
     )
+
+    # Get the Random Forest classifier with specified hyperparameters
     clf = RandomForestClassifier(
-        n_estimators=200,
-        class_weight="balanced",
+        n_estimators=200,           # number of trees in the forest
+        class_weight="balanced",    # handle class imbalance by giving more weight to the minority class (binding points)
         random_state=42,
         n_jobs=-1,
     )
+
+    # Train the Random Forest model on the training data (X_tr, y_tr)
     clf.fit(X_tr, y_tr)
 
+    # Evaluate the trained model on the held-out test set and print/save metrics
     print("\n── Evaluation on held-out test split ──")
     _, preds, _ = evaluate_model(
         clf,
@@ -365,6 +412,7 @@ def train(
     if eval_log_path:
         print(f"Training evaluation saved → {eval_log_path}")
 
+    # Save the trained model to a file for later use in prediction mode
     joblib.dump(clf, model_out)
     print(f"Model saved → {model_out}")
 
@@ -391,24 +439,31 @@ def predict(
         print(f"Error: model not found at {model_path}")
         return None, None
 
+    # Load the trained model from the specified path
     model = joblib.load(model_path)
     print(f"Model loaded: {model_path}")
 
+    # Extract the base name of the PDB file (without extension) to use for logging and output naming
     name      = os.path.splitext(os.path.basename(pdb_path))[0]
     pssm_path = os.path.join(pssm_dir, f"{name}.pssm") if pssm_dir else None
 
+    # Process the protein structure to get features (X), labels (y), SAS points, and other info needed for prediction and output writing
     X, y, sas_points, protein, ns = process_protein(pdb_path, pssm_path)
     if X is None:
         return None, None
 
     print("[5] Predicting binding probabilities …")
+    # Use the loaded model to predict probabilities for each SAS point
     probs   = model.predict_proba(X)[:, 1]
+
+    # Cluster high-probability points into pockets using the specified threshold and DBSCAN parameters
     pockets = cluster_points(sas_points, probs, threshold=threshold)
 
     print(f"\n    Pockets found: {len(pockets)}")
     for i, p in enumerate(pockets[:5], 1):
         print(f"    Pocket {i}: score={p['score']:.3f}  size={p['size']}")
 
+    # Evaluate the predicted probabilities against the true labels for this protein and print/save metrics
     evaluate_scores(
         probs,
         y,
@@ -416,6 +471,8 @@ def predict(
         label=f"{name} POINT-LEVEL",
         output_csv=eval_log_path,
     )
+
+    # Write the predicted pockets to output files (CSV, visualization PDB, Chimera format)
     write_outputs(pockets, protein, ns, name, output_dir, results_dir)
     return probs, y
 
@@ -425,6 +482,9 @@ def predict(
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_parser():
+    ''''
+    Build the command-line argument parser with subcommands for training and prediction.
+    '''
     p = argparse.ArgumentParser(
         description="Binding-pocket predictor",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -477,6 +537,7 @@ def main():
         eval_log_path = os.path.join("results", "logs", "train_evaluation.csv")
         prepare_evaluation_log(eval_log_path)
 
+        # Call the train function with the list of PDB files and other parameters for training the model and evaluating it on a held-out test split
         train(
             pdb_files,
             pssm_dir=args.pssm_dir,
@@ -507,6 +568,7 @@ def main():
         all_y = []
 
         for pdb in sorted(targets):
+            # Run the prediction pipeline on each target PDB file and collect probabilities and true labels for global evaluation later
             probs, y_true = predict(
                 pdb_path       = pdb,
                 model_path     = args.model,
@@ -521,6 +583,7 @@ def main():
                 all_probs.append(probs)
                 all_y.append(y_true)
 
+        # After processing all target PDB files, perform a global evaluation across all predictions if any probabilities and labels were collected, and save the summary to a CSV file
         if all_probs and all_y:
             print("\n=== GLOBAL TEST-SET EVALUATION ===")
             evaluate_scores(

@@ -2,6 +2,7 @@
 import numpy as np
 from scipy.spatial.distance import pdist
 import csv
+from time import perf_counter
 
 # ── Hydrophobicity scale (Kyte-Doolittle) ─────────────────────────────────────
 # Higher = more hydrophobic. Used to score the local chemical environment.
@@ -51,12 +52,31 @@ class FeatureExtractor:
         self.protein = protein
         self.neighbor_search = neighbor_search
         self.radius = radius
-        # Precompute protein centroid once - used for depth feature
-        all_coords = np.array([a.coord for a in protein.atoms]) # Creation of a numpy array called `all_coords` by extracting the 3D coordinates `coord` from every atom in the protein object
+        # Precompute protein centroid once — used for depth feature
+        all_coords = np.array([a.coord for a in protein.atoms]) #Creation of a numpy array called `all_coords` by extracting the 3D coordinates `coord` from every atom in the protein object
         self.centroid = all_coords.mean(axis=0) # This computes the centroid (average position) of all atoms and stores it as an instance variable
         self.protein_radius = float(np.max(          
             np.linalg.norm(all_coords - self.centroid, axis=1)
         ))
+        self.timers = {
+            "neighbor_count": 0.0,
+            "mean_dist": 0.0,
+            "std_dist": 0.0,
+            "min_dist": 0.0,
+            "density": 0.0,
+            "depth": 0.0,
+            "depth_norm": 0.0,
+            "surface_curvature": 0.0,
+            "pocket_depth": 0.0,
+            "hydrophobicity": 0.0,
+            "charge": 0.0,
+            "h-bond": 0.0,
+            "amino acid composition": 0.0,
+            "hydrophobic_patch": 0.0,
+            "charge_distribution": 0.0,
+            "evolutionary": 0.0
+        }
+
 
     def load_pssm(self, pssm_file):
         """
@@ -97,8 +117,25 @@ class FeatureExtractor:
         Extract features for all SAS points at once.
         Returns a 2D matrix of shape (N_points, N_features) thanks to np.array
         """
+        # Reset timers for this protein
+        for key in self.timers:
+            self.timers[key] = 0.0
+
         # Each call computes one feature vector (geo+phys+curve)
-        return np.array([self.extract(pt) for pt in sas_points]) 
+        features = np.array([self.extract(pt) for pt in sas_points])
+
+        # -------- PRINT SUMMARY --------
+        print("\n=== FEATURE TIMING (per protein) ===")
+        total = sum(self.timers.values())
+
+        for k, v in self.timers.items():
+            perc = (v / total * 100) if total > 0 else 0
+            print(f"{k:20s}: {v:.2f}s ({perc:.1f}%)")
+
+        print(f"{'TOTAL':20s}: {total:.2f}s\n")
+
+        return features
+
 
     # ─────────────────────────────────────────────────────────────────────────
     # Group 1: Geometry
@@ -125,28 +162,42 @@ class FeatureExtractor:
         coords = np.array([a.coord for a in neighbors])
         dists = np.linalg.norm(coords - point, axis=1)
 
+        t0 = perf_counter()  # Start timer
         # [0] Total neighbor count
         neighbor_count = float(len(neighbors))
+        self.timers["neighbor_count"] += perf_counter() - t0
 
+        t0 = perf_counter()  # Start timer
         # [1] Mean distance to neighbors
         mean_dist = float(np.mean(dists))
-
+        self.timers["mean_dist"] += perf_counter() - t0
+        
+        t0 = perf_counter()  # Start timer
         # [2] Std of distances — low std = tight pocket, high std = flat surface
         std_dist = float(np.std(dists))
+        self.timers["std_dist"] += perf_counter() - t0
 
+        t0 = perf_counter()  # Start timer
         # [3] Minimum distance — how close is the nearest atom
         min_dist = float(np.min(dists))
-
+        self.timers["min_dist"] += perf_counter() - t0
+        
+        t0 = perf_counter()  # Start timer
         # [4] Local density — atoms per Å³ inside the query sphere
         sphere_volume = (4 / 3) * np.pi * (self.radius ** 3)
         density = neighbor_count / sphere_volume
+        self.timers["density"] += perf_counter() - t0
 
+        t0 = perf_counter()  # Start timer
         # [5] Depth — distance of the SAS point from the protein's centroid
         #     Points deep inside cavities are close to the centroid
-        depth = float(np.linalg.norm(point - self.centroid))
+        depth = float(np.linalg.norm(point - self.centroid))    
+        self.timers["depth"] += perf_counter() - t0
 
+        t0 = perf_counter()  # Start timer
         # [6] Normalized depth 
         depth_norm = depth / self.protein_radius if self.protein_radius > 0 else 0.0
+        self.timers["depth_norm"] += perf_counter() - t0
 
         return np.array([
             neighbor_count, mean_dist, std_dist,
@@ -162,6 +213,7 @@ class FeatureExtractor:
         Estimate local curvature using PCA on neighbor coordinates.
         The ratio of the smallest to largest eigenvalue approximates concavity.
         """
+        t0 = perf_counter()  # Start timer
 
         # PCA requires at least 3-4 points of reliable covariance estimation, so defaults to 0.0
         if len(neighbors) < 4:
@@ -175,6 +227,9 @@ class FeatureExtractor:
         
         # Low ratio → flat; high ratio → curved/concave
         curvature = eigenvalues[0] / (eigenvalues[-1] + 1e-8) # Divide by epsilon to avoid 0s!!
+        
+        self.timers["surface_curvature"] += perf_counter() - t0
+
         return float(curvature)
     
     # POCKET DEPTH
@@ -183,6 +238,8 @@ class FeatureExtractor:
         Cast rays outward from the point. 
         Fraction of blocked rays ≈ how enclosed the point is.
         """
+        t0 = perf_counter()  # Start timer
+
         directions = self._fibonacci_sphere(n_rays) # _fibonacci_sphere is the helper method
         blocked = 0 # initialize the ocunter for the num,ber of rays that are blocked by protein atoms
         
@@ -195,6 +252,8 @@ class FeatureExtractor:
                     blocked += 1
                     break
         
+        self.timers["pocket_depth"] += perf_counter() - t0
+
         return float(blocked) / n_rays  # 0 = exposed, 1 = fully enclosed
         # Return the fraction of blocked rays
 
@@ -231,15 +290,18 @@ class FeatureExtractor:
             return np.zeros(27)
 
         # ── Hydrophobicity ────────────────────────────────────────────────────
+        t0 = perf_counter()  # Start timer
         hydro_scores = [
             HYDROPHOBICITY.get(a.residue_name, 0.0) for a in neighbors
         ]
         mean_hydro = float(np.mean(hydro_scores))
         std_hydro  = float(np.std(hydro_scores))
+        self.timers["hydrophobicity"] += perf_counter() - t0
 
         # ── Charge ────────────────────────────────────────────────────────────
         # Use unique residues to avoid counting a residue multiple times
         # (a residue has many atoms but one charge)
+        t0 = perf_counter()  # Start timer
         seen_residues = set() # creates a set to track unique residues already processed (preventing duplicates)
         charge_values = [] # creates a list to collect the charge values of unique residues
         n_positive = 0
@@ -259,15 +321,19 @@ class FeatureExtractor:
         total_charge = float(sum(charge_values))
         n_positive   = float(n_positive)
         n_negative   = float(n_negative)
+        self.timers["charge"] += perf_counter() - t0
 
         # ── H-bond donors and acceptors ───────────────────────────────────────
         # Count at the atom level — atom name (e.g. "NH1") determines role
+        t0 = perf_counter()  # Start timer
         n_donors    = float(sum(1 for a in neighbors if a.name in HBOND_DONORS)) #generator expression to count matches efficiently
         n_acceptors = float(sum(1 for a in neighbors if a.name in HBOND_ACCEPTORS))
+        self.timers["h-bond"] += perf_counter() - t0
 
         # ── Amino acid composition (one-hot fraction) ─────────────────────────
         # Instead of a hard one-hot, we use the *fraction* of each aa type
         # among neighboring residues — more informative for variable-size windows
+        t0 = perf_counter()  # Start timer
         aa_counts = np.zeros(20)
         seen_for_aa = set()
 
@@ -279,6 +345,8 @@ class FeatureExtractor:
 
         total_residues = aa_counts.sum()
         aa_fractions = aa_counts / total_residues if total_residues > 0 else aa_counts
+
+        self.timers["amino acid composition"] += perf_counter() - t0
 
         return np.concatenate([
             [mean_hydro, std_hydro, total_charge,
@@ -296,6 +364,8 @@ class FeatureExtractor:
         Measures spatial clustering of hydrophobic atoms near the point.
         A tight cluster = real hydrophobic patch = likely binding site.
         """
+        t0 = perf_counter()  # Start timer
+
         hydrophobic_coords = np.array([
             a.coord for a in neighbors 
             if a.residue_name in HYDROPHOBIC_RESIDUES
@@ -307,6 +377,9 @@ class FeatureExtractor:
         # Mean pairwise distance between hydrophobic atoms - lower = more clustered
         mean_pairwise = float(np.mean(pdist(hydrophobic_coords)))
         # Invert so higher score = more clustered
+
+        self.timers["hydrophobic_patch"] += perf_counter() - t0
+
         return 1.0 / (mean_pairwise + 1e-8)
     
     # Charge distribution: the spatial separation between positive and negative charges
@@ -316,6 +389,8 @@ class FeatureExtractor:
         Computes a charge dipole moment vector around the SAS point.
         Returns its magnitude — large value = strong charge separation.
         """
+        t0 = perf_counter()  # Start timer
+
         dipole = np.zeros(3)
         
         for atom in neighbors:
@@ -323,7 +398,9 @@ class FeatureExtractor:
             if charge != 0:
                 direction = atom.coord - point
                 dipole += charge * direction
-        
+
+        self.timers["charge_distribution"] += perf_counter() - t0
+
         return float(np.linalg.norm(dipole))
     
     # ─────────────────────────────────────────────────────────────────────────
@@ -339,6 +416,8 @@ class FeatureExtractor:
         
         Returns a numpy array of shape (1,) so it can be concatenated.
         """
+        t0 = perf_counter()  # Start timer
+
         # Safety check: if PSSM was not loaded, return 0
         if not hasattr(self, "pssm") or len(self.pssm) == 0:
             return np.zeros(1)
@@ -354,5 +433,7 @@ class FeatureExtractor:
                 best_dist  = dist
                 # residue_id is the sequence number - matches the PSSM index
                 best_score = self.pssm.get(residue.residue_id, 0.0)
+
+        self.timers["evolutionary"] += perf_counter() - t0
 
         return np.array([best_score])

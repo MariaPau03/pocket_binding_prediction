@@ -20,9 +20,11 @@ class Residue:
         self.atoms = []
 
     def add_atom(self, atom):
+        # Add an Atom object to the residue's list of atoms
         self.atoms.append(atom)
 
     def get_center(self):
+        # Calculate the geometric center of the residue by averaging the coordinates of its atoms
         coords = np.array([atom.coord for atom in self.atoms])
         return coords.mean(axis=0)
 
@@ -39,16 +41,19 @@ class Protein:
             self.load()
 
     def load(self):
+        # Load the PDB file and parse its contents to populate the atoms, ligand_atoms, and residues lists
         # Reset containers to keep load() idempotent.
         self.atoms = []
         self.ligand_atoms = []
         self.residues = []
 
+        # Use Biopython's PDBParser to read the structure from the PDB file
         parser = PDBParser(QUIET=True)
         structure = parser.get_structure("protein", self.pdb_file)
 
         residue_dict = {}
 
+        # Iterate through all models, chains, and residues in the structure
         for model in structure:
             for chain in model:
                 for residue in chain:
@@ -59,6 +64,7 @@ class Protein:
                     chain_id = chain.id
 
                     # PROTEIN
+                    # Only consider standard amino acid residues (hetflag == " ") and ignore water molecules (hetflag == "W")
                     if hetflag == " ":
                         key = (chain_id, res_id)
 
@@ -96,11 +102,13 @@ class Protein:
         self._loaded = True
 
     def get_atom_coordinates(self):
+        # Return a numpy array of the coordinates of all atoms in the protein
         if not self._loaded:
             self.load()
         return np.array([atom.coord for atom in self.atoms])
 
     def get_residue_centers(self):
+        # Return a numpy array of the geometric centers of all residues in the protein
         if not self._loaded:
             self.load()
         return np.array([res.get_center() for res in self.residues])

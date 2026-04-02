@@ -2,3 +2,4 @@ pocket_id,chain,residue_id,residue_name,center_x,center_y,center_z
 1,A,20,TRP,61.503,32.465,88.127
 1,A,218,PRO,69.151,28.54,87.133
 1,A,219,TRP,70.763,30.568,90.385
+1,A,298,CYS,67.474,35.346,95.332

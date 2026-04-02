@@ -80,21 +80,40 @@ def visualize_clusters(pdb_id, top_n=1, rotate=False, results_dir="results"):
             f.write("turn y 180\n")
 
         f.write("view\n")
+<<<<<<< Updated upstream
         
+=======
+        #f.write("exit\n")
+>>>>>>> Stashed changes
 
         # ── Screenshot saved into screenshots/ ────────────────────────────
         screenshot_path = os.path.abspath(
             os.path.join(shots_dir, f"{pdb_id}_clusters.png")  # ← updated
         )
+<<<<<<< Updated upstream
         # f.write(f'save "{screenshot_path}" format png\n')
+=======
+        f.write(f'save "{screenshot_path}" format png\n')
+>>>>>>> Stashed changes
         f.write("exit\n")
 
     # ── Run ChimeraX headless ─────────────────────────────────────────────
 
+<<<<<<< Updated upstream
+=======
+    subprocess.run([
+       "/usr/bin/chimerax",
+        "--nogui",          # <- nogui  no window opens, it just executes the commands and saves the PNG automatically. You won't see anything on screen but the screenshot appears in results/screenshots/ when it's done.
+        "--offscreen",      # <- enables rendering without a display
+        "--script", chimera_script_path
+     ])
+
+>>>>>>> Stashed changes
     try:
         subprocess.run([
-            "/Applications/ChimeraX-1.11.1.app/Contents/MacOS/ChimeraX",
+            "/usr/bin/chimerax",
             "--nogui",
+            "--offscreen",
             "--script", chimera_script_path
         ], timeout=30)
     except Exception as e:
